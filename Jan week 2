@@ -1,0 +1,72 @@
+import re
+
+# 1. Configuration & Data
+STOPWORDS = {"is", "the", "a", "an", "are", "what", "how", "do", "i", "can", "you", "of", "to", "for", "any"}
+
+# Synonym Map: Maps various inputs to a single "Master Key"
+SYNONYM_MAP = {
+    "cost": "fees", "price": "fees", "tuition": "fees", "amount": "fees",
+    "hours": "timing", "open": "timing", "schedule": "timing", "close": "timing",
+    "place": "location", "address": "location", "where": "location", "area": "location",
+    "call": "contact", "phone": "contact", "email": "contact", "number": "contact",
+    "classes": "courses", "subjects": "courses", "programs": "courses", "study": "courses"
+}
+
+# The Master FAQ Database (using the Master Keys)
+FAQ_DATA = {
+    "timing": "Our institute is open Monday to Saturday, 9:00 AM to 6:00 PM.",
+    "fees": "General tuition starts at $2,000 per semester. Merit scholarships are available.",
+    "contact": "You can reach us at (555) 012-3456 or email admissions@institute.edu.",
+    "location": "We are located at 123 Education Lane, Academic City.",
+    "courses": "We offer programs in Data Science, AI, Web Dev, and UX Design.",
+    "admission": "Applications are open for the Fall semester! Apply on our website.",
+    "hostel": "On-campus housing is available for $500 per month including meals."
+}
+
+def preprocess_and_map(text):
+    # A. Lowercasing & Punctuation
+    text = text.lower()
+    text = re.sub(r'[^\w\s]', '', text)
+    
+    # B. Tokenization
+    tokens = text.split()
+    
+    # C. Cleaning and Synonym Mapping
+    final_intents = []
+    for word in tokens:
+        if word not in STOPWORDS:
+            # If the word is a synonym (e.g., 'price'), convert to master key ('fees')
+            # Otherwise, keep the original word
+            resolved_word = SYNONYM_MAP.get(word, word)
+            final_intents.append(resolved_word)
+            
+    return final_intents
+
+# 2. Main Bot Function
+def institute_bot():
+    print("--- Institute FAQ Bot: Online ---")
+    print("(Type 'exit' to stop)")
+    
+    while True:
+        user_input = input("\nYou: ")
+        
+        if user_input.lower() in ['exit', 'quit', 'bye']:
+            print("Bot: Goodbye! Have a great day.")
+            break
+            
+        # Get cleaned tokens (now mapped to Master Keys)
+        intents = preprocess_and_map(user_input)
+        
+        found = False
+        for intent in intents:
+            if intent in FAQ_DATA:
+                print(f"Bot: {FAQ_DATA[intent]}")
+                found = True
+                break # Exit after first match
+        
+        if not found:
+            print("Bot: I'm not sure about that. Try asking about fees, timing, location, or courses.")
+
+# 3. Run
+if __name__ == "__main__":
+    institute_bot()
