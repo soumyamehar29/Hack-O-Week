@@ -1,0 +1,64 @@
+import re
+
+# --- STEP 1: CONFIGURATION ---
+# Stopwords to ignore
+STOPWORDS = {"is", "the", "a", "an", "are", "what", "how", "do", "i", "can", "of", "to", "for", "tell", "me", "about"}
+
+# Keyword Groups (Synonyms -> Master Intent)
+SYNONYM_GROUPS = {
+    "fees": ["fees", "tuition", "payment", "cost", "price", "money", "scholarship"],
+    "timing": ["timing", "hours", "schedule", "open", "close", "time", "days"],
+    "contact": ["contact", "phone", "call", "email", "number", "reach", "address", "location"],
+    "courses": ["courses", "programs", "study", "classes", "subjects", "degrees"],
+    "admission": ["admission", "apply", "enroll", "registration", "join"]
+}
+
+# The actual answers mapped to Master Intents
+FAQ_ANSWERS = {
+    "fees": "Tuition is $2,000 per semester. We also offer 40% merit scholarships.",
+    "timing": "We are open Monday-Saturday, 9:00 AM to 6:00 PM.",
+    "contact": "Reach us at (555) 012-3456 or visit us at 123 Academic Lane.",
+    "courses": "We offer specialized tracks in AI, Data Science, and Web Development.",
+    "admission": "Applications for the 2026 Fall semester are now open on our portal."
+}
+
+# --- STEP 2: THE PROCESSING ENGINE ---
+def get_master_intent(user_word):
+    """Checks if a word belongs to any synonym group."""
+    for intent, synonyms in SYNONYM_GROUPS.items():
+        if user_word in synonyms:
+            return intent
+    return None
+
+def process_input(text):
+    # Lowercase and remove punctuation
+    text = re.sub(r'[^\w\s]', '', text.lower())
+    # Tokenize
+    tokens = text.split()
+    # Remove stopwords and find the first matching master intent
+    for word in tokens:
+        if word not in STOPWORDS:
+            intent = get_master_intent(word)
+            if intent:
+                return intent
+    return None
+
+# --- STEP 3: THE CHAT LOOP ---
+def run_bot():
+    print("--- Institute Assistant (Synonym-Aware) ---")
+    print("Ask about: Fees, Timings, Courses, or Admissions. (Type 'exit' to quit)")
+    
+    while True:
+        user_input = input("\nYou: ")
+        if user_input.lower() in ['exit', 'quit', 'bye']:
+            break
+            
+        intent = process_input(user_input)
+        
+        if intent in FAQ_ANSWERS:
+            print(f"Bot: {FAQ_ANSWERS[intent]}")
+        else:
+            print("Bot: I'm not sure about that. Could you try asking about 'fees' or 'schedules'?")
+
+if __name__ == "__main__":
+    run_bot()
