@@ -1,0 +1,42 @@
+def institute_bot():
+    print("--- Institute Assistant: Hello! How can I help you today? (Type 'exit' to quit) ---")
+    
+    # Dictionary of rules: Keywords mapped to responses
+    faq_data = {
+        ("timing", "hours", "open"): "Our institute is open Monday to Saturday, 9:00 AM to 6:00 PM.",
+        ("fees", "cost", "price", "tuition"): "Fees vary by course. General tuition starts at $2,000 per semester.",
+        ("contact", "phone", "email", "call"): "You can reach us at (555) 012-3456 or email info@institute.edu.",
+        ("location", "address", "where"): "We are located at 123 Education Lane, Academic City.",
+        ("courses", "programs", "study"): "We offer Data Science, AI, Web Development, and UX Design.",
+        ("admission", "apply", "enroll"): "Admissions are open! You can apply via our website's portal.",
+        ("scholarship", "financial aid"): "We offer merit-based scholarships covering up to 40% of tuition.",
+        ("placement", "jobs", "careers"): "Our placement cell has a 95% success rate with top tech firms.",
+        ("hostel", "accommodation", "housing"): "On-campus housing is available for both domestic and international students.",
+        ("library", "books"): "The central library is accessible 24/7 for all registered students.",
+        ("canteen", "food", "cafeteria"): "Our cafeteria serves breakfast, lunch, and dinner with organic options.",
+        ("principal", "head", "dean"): "Our Dean is Dr. Sarah Jenkins, a pioneer in educational research.",
+        ("exams", "test", "assessment"): "Mid-terms are in October; Finals are held in late May.",
+        ("extracurricular", "clubs", "sports"): "We have over 20 active clubs, including Robotics and Drama."
+    }
+
+    while True:
+        user_input = input("You: ").lower()
+        
+        if user_input in ['exit', 'bye', 'quit']:
+            print("Bot: Goodbye! Have a great day.")
+            break
+        
+        found = False
+        # Pattern Matching Logic
+        for keywords, response in faq_data.items():
+            if any(word in user_input for word in keywords):
+                print(f"Bot: {response}")
+                found = True
+                break # Stop after the first match to avoid conflicting answers
+        
+        if not found:
+            print("Bot: I'm sorry, I don't have information on that. Please try asking about fees, timing, or courses.")
+
+# Run the bot
+if __name__ == "__main__":
+    institute_bot()
