@@ -1,0 +1,69 @@
+import re
+
+# 1. Regex Patterns for Entities
+ENTITY_PATTERNS = {
+    "course_code": r"\b[A-Z]{2,3}\s?\d{1,3}\b|\b(CS|MATH|AI|BIO|PHY)\b", # Matches CS101 or just CS
+    "semester": r"(?:sem(?:ester)?\s?)([1-8])",                         # Matches SEM 5 or Semester 3
+    "date": r"\b\d{1,2}(?:st|nd|rd|th)?\s(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\b"
+}
+
+def extract_entities(text):
+    entities = {"course_code": None, "semester": None, "date": None}
+    
+    # Extract Course Code
+    course_match = re.search(ENTITY_PATTERNS["course_code"], text, re.IGNORECASE)
+    if course_match:
+        entities["course_code"] = course_match.group(0).upper()
+        
+    # Extract Semester
+    sem_match = re.search(ENTITY_PATTERNS["semester"], text, re.IGNORECASE)
+    if sem_match:
+        entities["semester"] = sem_match.group(1) # Gets the digit
+        
+    # Extract Date (if user mentions one)
+    date_match = re.search(ENTITY_PATTERNS["date"], text, re.IGNORECASE)
+    if date_match:
+        entities["date"] = date_match.group(0)
+        
+    return entities
+
+# 2. Mock Database for "Dynamic" Responses
+EXAM_DB = {
+    ("CS", "5"): "October 20th, 2026",
+    ("AI", "3"): "November 12th, 2026",
+    ("MATH", "1"): "December 5th, 2026"
+}
+
+def get_smart_response(user_input):
+    entities = extract_entities(user_input)
+    
+    # Logic for Exam Intent
+    if "exam" in user_input.lower() or "test" in user_input.lower():
+        course = entities["course_code"]
+        sem = entities["semester"]
+        
+        if course and sem:
+            # Check database for specific combo
+            date = EXAM_DB.get((course, sem))
+            if date:
+                return f"Found it! The {course} exam for Semester {sem} is scheduled for {date}."
+            else:
+                return f"I see you're asking about {course} Sem {sem}, but I don't have that date yet."
+        
+        elif course or sem:
+            missing = "semester" if not sem else "course code"
+            return f"I recognized you're asking about {course or 'Semester ' + sem}, but could you please provide the {missing} too?"
+
+    return "I'm not sure how to process that. Try asking: 'When is the CS SEM 5 exam?'"
+
+# 3. Test the Bot
+print("--- Entity-Aware Bot Online ---")
+test_queries = [
+    "When is SEM 5 CS exam?",
+    "Check date for Semester 3 AI test",
+    "What is the schedule for MATH?"
+]
+
+for q in test_queries:
+    print(f"\nUser: {q}")
+    print(f"Bot: {get_smart_response(q)}")
