@@ -1,0 +1,62 @@
+import re
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+
+# 1. The Knowledge Base (Questions and Answers)
+faq_database = {
+    "What are the institute timings and opening hours?": "We are open Monday to Saturday, 9:00 AM to 6:00 PM.",
+    "How much are the tuition fees and payment options?": "Fees are $2,000 per semester. We accept cards, bank transfers, and UPI.",
+    "Where is the campus located?": "Our main campus is at 123 Academic Lane, University District.",
+    "What courses and programs do you offer?": "We offer AI, Data Science, Web Development, and Digital Marketing.",
+    "How can I contact the admissions office?": "Call us at (555) 012-3456 or email admissions@institute.edu.",
+    "Is there any scholarship or financial aid?": "Yes, merit-based scholarships cover up to 40% of the tuition fee.",
+    "Are there hostel or housing facilities?": "On-campus housing is available for $500/month including meals.",
+    "What are the placement and job opportunities?": "95% of our students are placed in top tech companies like Google and Meta.",
+    "What is the admission process?": "Apply online via our portal, submit documents, and attend a short interview.",
+    "Is there a library on campus?": "The central library is open 24/7 for all registered students."
+}
+
+# Extract questions to train our "Brain"
+questions = list(faq_database.keys())
+
+# 2. Text Preprocessing Function
+def clean_text(text):
+    text = text.lower()
+    text = re.sub(r'[^\w\s]', '', text)
+    return text
+
+# 3. The Retrieval Engine
+def get_best_answer(user_query):
+    # Clean the input
+    user_query = clean_text(user_query)
+    
+    # Initialize TF-IDF Vectorizer
+    vectorizer = TfidfVectorizer(stop_words='english')
+    
+    # Transform all FAQ questions + User Query into vectors
+    tfidf_matrix = vectorizer.fit_transform(questions + [user_query])
+    
+    # Calculate Cosine Similarity between the User Query (the last vector) and FAQ questions
+    # compare index [-1] against all others [:-1]
+    similarities = cosine_similarity(tfidf_matrix[-1], tfidf_matrix[:-1])
+    
+    # Find the index of the highest similarity score
+    best_match_index = similarities.argmax()
+    max_score = similarities[0][best_match_index]
+    
+    # Threshold check: If the similarity is too low, the bot doesn't know the answer
+    if max_score < 0.2:
+        return "I'm sorry, I couldn't find a matching answer in my database. Try rephrasing!"
+    
+    matched_question = questions[best_match_index]
+    return faq_database[matched_question]
+
+# 4. Chat Loop
+print("--- TF-IDF Retrieval Bot: Active ---")
+while True:
+    user_msg = input("\nYou: ")
+    if user_msg.lower() in ['exit', 'quit', 'bye']:
+        break
+    
+    answer = get_best_answer(user_msg)
+    print(f"Bot: {answer}")
