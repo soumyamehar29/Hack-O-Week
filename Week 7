@@ -1,0 +1,86 @@
+import re
+
+# 1. Global Session State (In a real app, use a dict with user IDs)
+session_state = {
+    "current_intent": None,
+    "course": None,
+    "semester": None
+}
+
+# 2. Database for Lookups
+EXAM_DB = {
+    ("CS", "3"): "November 15th, 2026",
+    ("AI", "3"): "November 18th, 2026",
+    ("CS", "1"): "December 2nd, 2026"
+}
+
+def extract_entities(text):
+    """Refined extraction for multi-turn flow."""
+    entities = {}
+    
+    # Extract Course (CS, AI, MATH)
+    course_match = re.search(r"\b(CS|AI|MATH)\b", text, re.IGNORECASE)
+    if course_match:
+        entities["course"] = course_match.group(0).upper()
+        
+    # Extract Semester/Year (3rd, third, 3, etc.)
+    sem_map = {"first": "1", "second": "2", "third": "3", "fourth": "4"}
+    sem_match = re.search(r"(?:sem(?:ester)?|year)\s?([1-8])|(\bfirst\b|\bsecond\b|\bthird\b)", text, re.IGNORECASE)
+    
+    if sem_match:
+        val = sem_match.group(1) or sem_match.group(2).lower()
+        entities["semester"] = sem_map.get(val, val)
+        
+    return entities
+
+def get_chat_response(user_input):
+    global session_state
+    user_input_low = user_input.lower()
+    
+    # A. Detect Intent (Persistent until reset)
+    if any(word in user_input_low for word in ["exam", "test", "schedule"]):
+        session_state["current_intent"] = "exam_lookup"
+        
+    # B. Extract and Update State (Filling the slots)
+    new_entities = extract_entities(user_input)
+    if "course" in new_entities: session_state["course"] = new_entities["course"]
+    if "semester" in new_entities: session_state["semester"] = new_entities["semester"]
+    
+    # C. Handle Logic based on Intent
+    if session_state["current_intent"] == "exam_lookup":
+        course = session_state["course"]
+        sem = session_state["semester"]
+        
+        # Scenario 1: All slots filled
+        if course and sem:
+            date = EXAM_DB.get((course, sem), "TBD")
+            response = f"Got it. The {course} exam for Semester {sem} is on {date}."
+            # Clear state for the next topic
+            session_state = {"current_intent": None, "course": None, "semester": None}
+            return response
+            
+        # Scenario 2: Missing Course
+        elif sem and not course:
+            return f"I've noted you're in Semester {sem}. Which course (CS, AI, or MATH)?"
+            
+        # Scenario 3: Missing Semester
+        elif course and not sem:
+            return f"Checking {course} exams. Which semester or year is this for?"
+            
+        # Scenario 4: No entities yet
+        else:
+            return "Sure! I can check that for you. Which course and semester?"
+
+    return "I'm not sure how to help with that. Try: 'When is the CS exam?'"
+
+# 3. Simulate a Multi-Turn Conversation
+print("--- Multi-Turn Institute Bot ---")
+conversation = [
+    "When is the exam?",    # Turn 1: Sets intent
+    "For third year",       # Turn 2: Fills 'semester' slot
+    "CS"                    # Turn 3: Fills 'course' slot -> Final Answer
+]
+
+for msg in conversation:
+    print(f"\nYou: {msg}")
+    print(f"Bot: {get_chat_response(msg)}")
