@@ -1,0 +1,77 @@
+#include <Adafruit_LiquidCrystal.h>
+
+Adafruit_LiquidCrystal lcd(0);
+
+const int gas_input = A0;
+const int led = 6;
+const int buzzer = 12;
+const int trigPin = 10;
+const int echoPin = 9;
+const int pirPin = 2;
+
+const int SAFE_GAS_LEVEL = 300;
+const int SAFE_DISTANCE = 200;
+
+void setup() {
+  pinMode(led, OUTPUT);
+  pinMode(buzzer, OUTPUT);
+  pinMode(trigPin, OUTPUT);
+  pinMode(echoPin, INPUT);
+  pinMode(pirPin, INPUT);
+
+  Serial.begin(9600);
+  lcd.begin(16, 2);
+  lcd.print("Safety Monitor");
+}
+
+void loop() {
+  int gas = analogRead(gas_input);
+  long duration;
+  float distance;
+
+  // Ultrasonic distance measurement
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+  duration = pulseIn(echoPin, HIGH);
+  distance = duration * 0.0343 / 2;
+
+  int motion = digitalRead(pirPin);
+
+  // Display distance on first line
+  lcd.setCursor(0, 0);
+  lcd.print("Dist: ");
+  lcd.print(distance, 1);  // Show 1 decimal place
+  lcd.print(" cm   ");      // Clear residual characters
+
+  // Original alert system on second line
+  lcd.setCursor(0, 1);
+
+  if (gas > SAFE_GAS_LEVEL) {
+    lcd.print("DANGER! EVACUATE ");
+    digitalWrite(led, HIGH);
+    digitalWrite(buzzer, HIGH);
+    Serial.println("⚠️ ALERT: Toxic Gas Detected! EVACUATE!");
+  } 
+  else if (distance > 0 && distance < SAFE_DISTANCE) {
+    lcd.print("TOO CLOSE! MOVE  ");
+    digitalWrite(led, HIGH);
+    digitalWrite(buzzer, HIGH);
+    Serial.println("⚠️ ALERT: Object too close! Keep Safe Distance!");
+  } 
+  else if (motion == HIGH) {
+    lcd.print("Motion Detected! ");
+    digitalWrite(led, HIGH);
+    digitalWrite(buzzer, HIGH);
+    Serial.println("⚠️ ALERT: Motion detected in the area!");
+  } 
+  else {
+    lcd.print("Safe Environment ");
+    digitalWrite(led, LOW);
+    digitalWrite(buzzer, LOW);
+  }
+
+  delay(5000);
+}
