@@ -1,0 +1,362 @@
+#!/usr/bin/env python3
+"""
+IoT Proximity Sensor - Data-Cleaning Pipeline
+===============================================
+A production-structured, beginner-friendly script that loads raw sensor data,
+cleans it, engineers features, normalises it, and writes a ready-to-use CSV.
+
+Required libraries:  pandas, numpy, matplotlib, scikit-learn
+Usage:               python sensor_pipeline.py
+"""
+
+# ───────────────────────── imports ──────────────────────────────────────
+import os
+import numpy as np
+import pandas as pd
+import matplotlib
+matplotlib.use("Agg")                       # non-interactive backend
+import matplotlib.pyplot as plt
+from sklearn.preprocessing import MinMaxScaler
+
+# ───────────────────────── configuration ────────────────────────────────
+INPUT_FILE  = "sensor_data.csv"
+OUTPUT_FILE = "cleaned_sensor_data.csv"
+
+# Columns we treat as time-series (forward-fill appropriate)
+TIME_SERIES_COLS = ["proximity_value", "temperature", "humidity"]
+
+# Columns that are numeric but not time-series (fill with median)
+STATIC_NUMERIC_COLS = ["battery_voltage"]
+
+# Rolling-average window for noise smoothing (set to 0 to skip)
+ROLLING_WINDOW = 5
+
+# ----------
+#  1. LOAD DATA
+# ----------
+
+def load_data(filepath: str) -> pd.DataFrame:
+    """
+    Read the CSV into a DataFrame.
+    If the file does not exist the script exits gracefully.
+    """
+    if not os.path.isfile(filepath):
+        raise FileNotFoundError(f"'{filepath}' not found in {os.getcwd()}")
+
+    df = pd.read_csv(filepath)
+    print("=" * 70)
+    print("  RAW DATA OVERVIEW")
+    print("=" * 70)
+
+    print(f"\n> Shape : {df.shape[0]} rows x {df.shape[1]} columns")
+    print(f"\n> Head (first 5 rows):\n{df.head().to_string()}")
+    print(f"\n> Data types:\n{df.dtypes.to_string()}")
+    print(f"\n> Summary statistics:\n{df.describe().to_string()}")
+
+    # Missing values per column
+    missing = df.isnull().sum()
+    missing_pct = (missing / len(df) * 100).round(2)
+    miss_df = pd.DataFrame({"missing_count": missing, "missing_%": missing_pct})
+    print(f"\n> Missing values:\n{miss_df.to_string()}")
+
+    return df
+
+
+# ----------
+#  2. CLEAN MISSING VALUES
+# ----------
+
+def clean_missing_values(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    - Convert 'timestamp' to datetime, drop rows with NaT, then sort.
+    - Forward-fill time-series columns (preserves temporal continuity).
+    - Fill static numeric columns with column median (robust to outliers).
+    - Remove exact-duplicate rows.
+    """
+    df = df.copy()
+    rows_before = len(df)
+
+    # --- timestamp handling ------------------------------------------------
+    df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
+    nat_count = df["timestamp"].isna().sum()
+    if nat_count:
+        print(f"\n[!] Dropping {nat_count} rows with invalid / missing timestamps.")
+        df = df.dropna(subset=["timestamp"])
+
+    df = df.sort_values("timestamp").reset_index(drop=True)
+
+    # --- forward-fill for time-series columns ------------------------------
+    for col in TIME_SERIES_COLS:
+        if col in df.columns:
+            n_miss = df[col].isna().sum()
+            df[col] = df[col].ffill()          # forward fill
+            df[col] = df[col].bfill()          # back-fill any leading NaNs
+            if n_miss:
+                print(f"   [OK] Forward-filled {n_miss} NaNs in '{col}'")
+
+    # --- median fill for static numeric columns ----------------------------
+    for col in STATIC_NUMERIC_COLS:
+        if col in df.columns:
+            n_miss = df[col].isna().sum()
+            median_val = df[col].median()
+            df[col] = df[col].fillna(median_val)
+            if n_miss:
+                print(f"   [OK] Median-filled {n_miss} NaNs in '{col}' (median = {median_val:.2f})")
+
+    # --- remove duplicates ------------------------------------------------
+    dup_count = df.duplicated().sum()
+    if dup_count:
+        df = df.drop_duplicates().reset_index(drop=True)
+        print(f"   [OK] Removed {dup_count} duplicate rows")
+
+    rows_after = len(df)
+    print(f"\n   Rows: {rows_before} -> {rows_after}  "
+          f"(dropped {rows_before - rows_after})")
+
+    return df
+
+
+# ----------
+#  3. HANDLE OUTLIERS  (IQR method - flag & cap, don't blindly delete)
+# ----------
+
+def handle_outliers(df: pd.DataFrame,
+                    columns: list[str] | None = None,
+                    iqr_multiplier: float = 1.5) -> pd.DataFrame:
+    """
+    For each column detect outliers via the IQR rule:
+        lower = Q1 - k*IQR
+        upper = Q3 + k*IQR
+    Instead of removing rows we **cap** (Winsorise) them at the fences
+    and log how many values were affected.
+    """
+    df = df.copy()
+    if columns is None:
+        columns = TIME_SERIES_COLS + STATIC_NUMERIC_COLS
+
+    print("\n── Outlier handling (IQR method, capping) ──")
+    for col in columns:
+        if col not in df.columns:
+            continue
+
+        q1 = df[col].quantile(0.25)
+        q3 = df[col].quantile(0.75)
+        iqr = q3 - q1
+        lower = q1 - iqr_multiplier * iqr
+        upper = q3 + iqr_multiplier * iqr
+
+        outliers_low  = (df[col] < lower).sum()
+        outliers_high = (df[col] > upper).sum()
+        total = outliers_low + outliers_high
+
+        # Cap instead of delete
+        df[col] = df[col].clip(lower=lower, upper=upper)
+
+        print(f"   {col:20s}  |  IQR={iqr:.2f}  "
+              f"fence=[{lower:.2f}, {upper:.2f}]  "
+              f"outliers capped: {total}  (low {outliers_low}, high {outliers_high})")
+
+    return df
+
+
+# ----------
+#  4. DATA VALIDATION
+# ----------
+
+def validate_data(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Domain-specific sanity checks:
+      - proximity_value must be >= 0  (negative = physically impossible)
+      - humidity in [0, 100]
+      - battery_voltage in [0, 5]
+    Invalid values are set to NaN then forward-filled.
+    """
+    df = df.copy()
+    print("\n── Data validation ──")
+
+    # -- proximity must be non-negative ------------------------------------
+    neg_prox = (df["proximity_value"] < 0).sum()
+    if neg_prox:
+        print(f"   [!] {neg_prox} negative proximity values -> set to NaN & ffill")
+        df.loc[df["proximity_value"] < 0, "proximity_value"] = np.nan
+        df["proximity_value"] = df["proximity_value"].ffill().bfill()
+
+    # -- humidity bounds ---------------------------------------------------
+    if "humidity" in df.columns:
+        bad_h = ((df["humidity"] < 0) | (df["humidity"] > 100)).sum()
+        if bad_h:
+            print(f"   [!] {bad_h} out-of-range humidity values -> clipped to [0, 100]")
+            df["humidity"] = df["humidity"].clip(0, 100)
+
+    # -- battery voltage bounds --------------------------------------------
+    if "battery_voltage" in df.columns:
+        bad_b = ((df["battery_voltage"] < 0) | (df["battery_voltage"] > 5)).sum()
+        if bad_b:
+            print(f"   [!] {bad_b} out-of-range battery voltages -> clipped to [0, 5]")
+            df["battery_voltage"] = df["battery_voltage"].clip(0, 5)
+
+    # Final NaN audit
+    remaining_nans = df.isnull().sum().sum()
+    print(f"   Remaining NaNs across entire DataFrame: {remaining_nans}")
+
+    return df
+
+
+# ----------
+#  5. FEATURE ENGINEERING
+# ----------
+
+def feature_engineering(df: pd.DataFrame,
+                        rolling_window: int = ROLLING_WINDOW) -> pd.DataFrame:
+    """
+    Extract temporal & smoothing features:
+      - hour_of_day   -- 0-23  (captures daily pattern)
+      - day_of_week   -- 0=Mon ... 6=Sun
+      - proximity_rolling_avg -- rolling mean to smooth sensor noise
+    """
+    df = df.copy()
+    print("\n── Feature engineering ──")
+
+    # Time-based features
+    df["hour_of_day"] = df["timestamp"].dt.hour
+    df["day_of_week"] = df["timestamp"].dt.dayofweek   # 0=Mon
+    print("   [OK] Added 'hour_of_day' and 'day_of_week'")
+
+    # Rolling average per sensor (avoids cross-sensor bleed)
+    if rolling_window > 0:
+        df["proximity_rolling_avg"] = (
+            df.groupby("sensor_id")["proximity_value"]
+              .transform(lambda s: s.rolling(rolling_window, min_periods=1).mean())
+        )
+        print(f"   [OK] Added 'proximity_rolling_avg' (window={rolling_window})")
+
+    return df
+
+
+# ----------
+#  6. NORMALISATION  (MinMax scaling on proximity_value)
+# ----------
+
+def normalise_proximity(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Apply MinMax scaling to 'proximity_value' -> range [0, 1].
+    The original values are preserved in 'proximity_raw'.
+    """
+    df = df.copy()
+    scaler = MinMaxScaler()
+    df["proximity_raw"] = df["proximity_value"].copy()
+    df["proximity_value"] = scaler.fit_transform(df[["proximity_value"]])
+    print("\n   [OK] MinMax-scaled 'proximity_value' to [0, 1]  "
+          f"(original saved in 'proximity_raw')")
+    return df
+
+
+# ----------
+#  7. VISUALISATION  —  raw vs cleaned proximity over time
+# ----------
+
+def plot_raw_vs_cleaned(raw_df: pd.DataFrame,
+                        clean_df: pd.DataFrame) -> None:
+    """
+    Side-by-side line plots:
+      Left  – raw proximity values (before cleaning)
+      Right – cleaned & normalised proximity values
+    Saved as 'raw_vs_cleaned.png'.
+    """
+    fig, axes = plt.subplots(1, 2, figsize=(16, 5), sharey=False)
+
+    # --- raw ---
+    ax = axes[0]
+    ax.plot(raw_df["timestamp"], raw_df["proximity_value"],
+            linewidth=0.4, alpha=0.7, color="#e74c3c")
+    ax.set_title("Raw Proximity Values", fontsize=13, fontweight="bold")
+    ax.set_xlabel("Timestamp")
+    ax.set_ylabel("Proximity")
+    ax.tick_params(axis="x", rotation=30)
+    ax.grid(alpha=0.3)
+
+    # --- cleaned ---
+    ax = axes[1]
+    ax.plot(clean_df["timestamp"], clean_df["proximity_value"],
+            linewidth=0.4, alpha=0.7, color="#2ecc71", label="cleaned (scaled)")
+    if "proximity_rolling_avg" in clean_df.columns:
+        # Scale rolling avg too for visual comparison
+        scaler = MinMaxScaler()
+        rolling_scaled = scaler.fit_transform(
+            clean_df[["proximity_rolling_avg"]]
+        )
+        ax.plot(clean_df["timestamp"], rolling_scaled,
+                linewidth=1.2, alpha=0.9, color="#3498db",
+                label=f"rolling avg (w={ROLLING_WINDOW})")
+    ax.set_title("Cleaned & Normalised Proximity", fontsize=13, fontweight="bold")
+    ax.set_xlabel("Timestamp")
+    ax.set_ylabel("Scaled Proximity [0-1]")
+    ax.tick_params(axis="x", rotation=30)
+    ax.legend()
+    ax.grid(alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig("raw_vs_cleaned.png", dpi=150)
+    print("\n   [PLOT] Saved visualisation -> raw_vs_cleaned.png")
+
+
+# ----------
+#  8. SAVE OUTPUT
+# ----------
+
+def save_data(df: pd.DataFrame, filepath: str) -> None:
+    """Write the cleaned DataFrame to CSV."""
+    df.to_csv(filepath, index=False)
+    print(f"\n   [SAVE] Saved cleaned data -> {filepath}  ({len(df)} rows)")
+
+
+# ----------
+#  MAIN — orchestrates the full pipeline
+# ----------
+
+def main() -> None:
+    # Step 1 — Load
+    raw_df = load_data(INPUT_FILE)
+    rows_initial = len(raw_df)
+
+    # Prepare raw copy for visualisation (need datetime timestamps)
+    raw_vis = raw_df.copy()
+    raw_vis["timestamp"] = pd.to_datetime(raw_vis["timestamp"], errors="coerce")
+    raw_vis = raw_vis.dropna(subset=["timestamp"]).sort_values("timestamp")
+
+    # Step 2 — Clean missing values + duplicates
+    df = clean_missing_values(raw_df)
+
+    # Step 3 — Outlier handling (IQR capping)
+    df = handle_outliers(df)
+
+    # Step 4 — Domain validation
+    df = validate_data(df)
+
+    # Step 5 — Feature engineering
+    df = feature_engineering(df)
+
+    # Step 6 — Normalisation
+    df = normalise_proximity(df)
+
+    # Step 7 — Final summary
+    rows_final = len(df)
+    print("\n" + "=" * 70)
+    print("  CLEAN DATA SUMMARY")
+    print("=" * 70)
+    print(f"\n  Rows  :  {rows_initial} (raw)  ->  {rows_final} (clean)")
+    print(f"  Cols  :  {list(df.columns)}")
+    print(f"\n{df.describe().to_string()}")
+    print(f"\n  Head:\n{df.head().to_string()}")
+
+    # Step 8 — Visualise
+    plot_raw_vs_cleaned(raw_vis, df)
+
+    # Step 9 — Save
+    save_data(df, OUTPUT_FILE)
+
+    print("\n[DONE] Pipeline complete.\n")
+
+
+if __name__ == "__main__":
+    main()
